@@ -46,7 +46,7 @@ Windows 的两个安装包直接下；**macOS / Linux 那两行是按开源圈�
 | 系统 | Python | Node |
 |---|---|---|
 | **Windows** | [python.org](https://www.python.org/downloads/) 安装包，**务必勾选 `Add python.exe to PATH`** | [nodejs.org](https://nodejs.org/) 安装包 |
-| **macOS**<br>（未实测） | `brew install python@3.12`<br><span>或 [python.org](https://www.python.org/downloads/) 安装包</span> | `brew install node` |
+| **macOS**<br>（未实测） | `brew install python@3.12`<br>或 [python.org](https://www.python.org/downloads/) 安装包 | `brew install node` |
 | **Debian / Ubuntu**<br>（未实测） | `sudo apt install python3 python3-venv python3-pip` | 见下面的 ⚠️ |
 
 > ⚠️ **Linux 上不要用 `apt install nodejs`** —— Ubuntu 22.04 源里是 Node **12**，
