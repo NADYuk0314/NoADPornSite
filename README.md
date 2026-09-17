@@ -75,7 +75,7 @@ Windows 的两个安装包直接下；**macOS / Linux 那两行是按开源圈�
 
 ### 方式一：双击 `start.bat`（仅 Windows，最快）
 
-1. 装好 Python（3.10+，且进了 PATH）
+1. 装好 Python（3.10+，且进了 PATH）、node（18+，且进了 PATH）
 2. **双击 `start.bat`**
 3. 浏览器打开 <http://127.0.0.1:8000>
 
