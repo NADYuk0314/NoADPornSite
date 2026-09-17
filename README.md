@@ -124,7 +124,7 @@ python app.py
 > `requirements.txt` 里已经用环境标记（marker）帮你把上界卡在 49 以下，正常情况
 > 不用管；万一还是报编译错误，单独跑 `python -m pip install "cryptography<49"`。
 
-**macOS / Linux 上没有 `start.bat`，用这条。** 然后浏览器打开 <http://127.0.0.1:8000>。
+**macOS / Linux 上没有 `start.bat`，用python app.py启动。** 然后浏览器打开 <http://127.0.0.1:8000>。
 
 装完可以自检一下：
 
