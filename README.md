@@ -105,7 +105,7 @@ Windows 的两个安装包直接下；**macOS / Linux 那两行是按开源圈�
 **这一步请务必用虚拟环境。** macOS（Homebrew）和 Ubuntu 23.04+ / Debian 12+ 的系统
 Python 受 [PEP 668](https://peps.python.org/pep-0668/) 保护，直接 `pip install` 会被
 拦下来报 `externally-managed-environment`。Windows 没这个限制，但用 venv 同样是
-好习惯（`start.bat` 走的也是这条路，只是省了手动敲）。
+好习惯（`start.bat` 没有这么干，想的话在windows你也可以手动装依赖）。
 
 ```bash
 python3 -m venv .venv            # Linux 上报错就先 sudo apt install python3-venv
