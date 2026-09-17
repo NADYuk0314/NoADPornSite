@@ -75,6 +75,12 @@ UA = (
     "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
 
+# 启动签名助手用的 Node 可执行文件，默认靠 PATH 找 "node"。
+# 留个环境变量是因为：Node 若是用 nvm / Homebrew 装的，而本程序又从
+# 桌面图标 / launchd 之类的地方启动，那个进程的 PATH 里往往没有 node。
+# 这时用 ADSKIPER_NODE_BIN=/opt/homebrew/bin/node 指过去即可。
+NODE_BIN = os.environ.get("ADSKIPER_NODE_BIN", "node").strip() or "node"
+
 VENDOR_RE = re.compile(r'src="(https://hanime-cdn\.com/js/vendor\.[^"]+\.js)"')
 
 # 目录缓存时长（参考实现取 30~60 分钟）
@@ -162,11 +168,27 @@ class Signer:
         if not self.vendor_path.exists():
             raise SignerError(f"找不到 vendor 文件：{self.vendor_path}")
 
-        self._proc = subprocess.Popen(
-            ["node", str(script), str(self.vendor_path)],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, encoding="utf-8", errors="replace", bufsize=1,
-        )
+        try:
+            self._proc = subprocess.Popen(
+                [NODE_BIN, str(script), str(self.vendor_path)],
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, encoding="utf-8", errors="replace", bufsize=1,
+            )
+        except FileNotFoundError as exc:
+            # ⚠️ 这里必须自己包装。Popen 找不到可执行文件时抛的是 FileNotFoundError，
+            # 而调用方（Signer.sign / _resolve_hanime）只接 SignerError —— 不包的话
+            # 异常会一路逃逸出接口，FastAPI 返回一个 text/plain 的裸 500
+            # "Internal Server Error"，前端 r.json() 还会再抛一次 JSON 解析错误，
+            # 用户看到的是 "Unexpected token 'I'..." 完全看不出是没装 node。
+            # 只影响 hanime，另外两个站不经过这条路。
+            raise SignerError(
+                f"找不到 {NODE_BIN} 可执行文件 —— hanime.tv 取流需要 Node.js 18+，"
+                f"请先安装并确认它在 PATH 里（node --version 能打印版本）。"
+                f"RedTube / PornHub 不受影响，可以直接用。"
+            ) from exc
+        except OSError as exc:
+            raise SignerError(f"启动签名助手失败：{exc}") from exc
+
         self._lines = queue.Queue()
         threading.Thread(target=self._pump, args=(self._proc.stdout,), daemon=True).start()
         threading.Thread(target=self._drain_stderr, args=(self._proc.stderr,), daemon=True).start()

@@ -1,11 +1,23 @@
 # 运行依赖 —— 全部是宽松许可（MIT / BSD / Apache / 公有领域），可用于商用。
 # 逐个的许可证说明见 README.md 的「许可证」一节。
+#
+# 安装：python -m pip install -r requirements.txt
+# ⚠️ Linux（Ubuntu 23.04+ / Debian 12+）和 macOS(Homebrew) 上直接用系统 Python 装
+#    会被 PEP 668 拦下来（externally-managed-environment）。请先建虚拟环境，
+#    见 README 的「安装 / 启动」。Windows 没这个限制。
 fastapi>=0.141
 uvicorn[standard]>=0.53
 httpx>=0.28
 yt-dlp>=2026.8.19
 # hanime.tv 取流要拆它的 AES-256-GCM 消息封装（Apache-2.0 OR BSD-3-Clause）
 cryptography>=42
+# ↑ cryptography 从 49.0.0 起**不再发布 Intel macOS（x86_64）的预编译 wheel**，
+#   只有 arm64。所以 Intel Mac 上要额外卡住上界，否则 pip 会去找源码包、
+#   需要 Rust 工具链才能编译。下面这行的 marker 只在 Intel Mac 上生效，
+#   其它平台（含 Apple Silicon、Linux、Windows）仍是 >=42 的最新版。
+cryptography<49; sys_platform == "darwin" and platform_machine == "x86_64"
 
 # 额外需要（不通过 pip）：
 #   node       —— hanime 的签名助手用。见 hanime_signer.js / README「hanime.tv」一节
+#                 macOS / Linux 上没有 start.bat 帮你检测，缺了会在这站点上报错，
+#                 不影响 RedTube / PornHub。

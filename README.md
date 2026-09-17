@@ -21,8 +21,6 @@
 
 ## 前置环境
 
-只有两样东西要自己装，装完能在 PATH 里找到就行：
-
 | 需要 | 版本 | 干什么用的 | 没有会怎样 |
 |---|---|---|---|
 | **Python** | **3.10 或更新** | 跑后端 | 完全起不来 |
@@ -30,24 +28,39 @@
 
 **Python 3.10 是硬下限**：`fastapi` / `uvicorn` / `starlette` / `anyio` / `click` / `yt-dlp`
 声明的 `Requires-Python` 全是 `>=3.10`，低于这个版本 pip 根本装不上。
-`start.bat` 会替你把版本卡住；手动装的话自己注意。
 
-**Node 是可选的**：只有 hanime.tv 需要它（它的取流要跑站点自己的 WASM 来算签名）。
-不装也能正常用，RedTube / PornHub 完全不受影响。
+**Node 是可选的**：只有 hanime.tv 需要它。不装也能正常用。
 
-自己确认一下：
+自己确认一下（macOS / Linux 上大多只有 `python3`，没有 `python`）：
 
 ```bash
-python --version     # 需要 >= 3.10
+python3 --version    # 需要 >= 3.10
 node --version       # 需要 >= 18（可选）
 ```
 
-下载：[Python](https://www.python.org/downloads/)（Windows 安装时**务必勾选**
-`Add python.exe to PATH`，否则 `start.bat` 找不到它）、[Node.js](https://nodejs.org/)
+### 怎么装
+
+Windows 的两个安装包直接下；**macOS / Linux 那两行是按开源圈最常见的做法给的，
+我没在对应系统上实测过**：
+
+| 系统 | Python | Node |
+|---|---|---|
+| **Windows** | [python.org](https://www.python.org/downloads/) 安装包，**务必勾选 `Add python.exe to PATH`** | [nodejs.org](https://nodejs.org/) 安装包 |
+| **macOS**<br>（未实测） | `brew install python@3.12`<br><span>或 [python.org](https://www.python.org/downloads/) 安装包</span> | `brew install node` |
+| **Debian / Ubuntu**<br>（未实测） | `sudo apt install python3 python3-venv python3-pip` | 见下面的 ⚠️ |
+
+> ⚠️ **Linux 上不要用 `apt install nodejs`** —— Ubuntu 22.04 源里是 Node **12**，
+> 达不到 18，装了也白装。用 [NodeSource](https://github.com/nodesource/distributions)
+> 或 [nvm](https://github.com/nvm-sh/nvm)：
+> ```bash
+> curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt install -y nodejs
+> ```
+> 另外 **`python3-venv` 别漏**，少了它下一步 `python3 -m venv` 会直接报错。
 
 ### 还需要一个能连出去的代理
 
-站点和它们的 CDN 都在墙外，后端默认出口是 `http://127.0.0.1:7890`（Clash 混合端口）。
+站点和它们的 CDN 都在墙外，后端默认出口是 `http://127.0.0.1:7890`
+（Clash 混合端口；ClashX / mihomo 的默认值也是这个）。
 **先把代理跑起来再启动**，否则两个 tube 站的搜索会直接超时。
 
 浏览器本身**不需要任何代理** —— 所有上游媒体都由后端中转，浏览器只连 `127.0.0.1`。
@@ -60,7 +73,7 @@ node --version       # 需要 >= 18（可选）
 
 两条路，选一条就行 —— 跑起来的是同一个东西。
 
-### 方式一：双击 `start.bat`（仅Windows，最快）
+### 方式一：双击 `start.bat`（仅 Windows，最快）
 
 1. 装好 Python（3.10+，且进了 PATH）
 2. **双击 `start.bat`**
@@ -89,26 +102,83 @@ node --version       # 需要 >= 18（可选）
 
 ### 方式二：自己装依赖再启动（跨平台，mac、linux）
 
-`start.bat` 只是把下面这两条命令包了一层 —— 效果完全一样：
+**这一步请务必用虚拟环境。** macOS（Homebrew）和 Ubuntu 23.04+ / Debian 12+ 的系统
+Python 受 [PEP 668](https://peps.python.org/pep-0668/) 保护，直接 `pip install` 会被
+拦下来报 `externally-managed-environment`。Windows 没这个限制，但用 venv 同样是
+好习惯（`start.bat` 走的也是这条路，只是省了手动敲）。
 
 ```bash
+python3 -m venv .venv            # Linux 上报错就先 sudo apt install python3-venv
+
+source .venv/bin/activate        # macOS / Linux
+.venv\Scripts\activate           # Windows (cmd / PowerShell)
+
 python -m pip install -r requirements.txt
 python app.py
 ```
 
-想用虚拟环境（推荐，免得污染系统环境）：
+> **为什么用 `python3`**：macOS 和多数 Linux 上**没有** `python` 这个命令。
+> 激活 venv 之后里面两个名字都有，后面几条命令照样能用 `python`。
+>
+> **Intel Mac 注意**：`cryptography` 从 49.0.0 起不再发布 Intel macOS 的预编译包。
+> `requirements.txt` 里已经用环境标记（marker）帮你把上界卡在 49 以下，正常情况
+> 不用管；万一还是报编译错误，单独跑 `python -m pip install "cryptography<49"`。
+
+**macOS / Linux 上没有 `start.bat`，用这条。** 然后浏览器打开 <http://127.0.0.1:8000>。
+
+装完可以自检一下：
 
 ```bash
-python -m venv .venv
-.venv\Scripts\activate          # Windows
-source .venv/bin/activate       # macOS / Linux
-python -m pip install -r requirements.txt
-python app.py
+python -c "import fastapi, uvicorn, httpx, yt_dlp, cryptography; print('依赖 OK')"
+node --version        # 可选；没装也不影响另两个站
 ```
 
-**macOS / Linux 上没有 `start.bat`，用这条。**
+---
 
-然后浏览器打开 <http://127.0.0.1:8000>。
+## 装不上怎么办
+
+**macOS / Linux 那两行命令我没实测过**（开发机只有 Windows），只按最通用的做法给。
+跟着做卡住了，按下面顺序排查，绝大多数问题在前两步就解决。
+
+### 1. 按报错关键词直接对号入座
+
+| 报错里出现 | 意思 | 怎么办 |
+|---|---|---|
+| `externally-managed-environment` | 没在虚拟环境里装 | 回到方式二，先 `source .venv/bin/activate` |
+| `No module named venv` / `ensurepip is not available` | 缺 `python3-venv` | `sudo apt install python3-venv` |
+| `command not found: python` | 只有 `python3` | 命令里的 `python` 换成 `python3` |
+| `command not found: node` | 没装 Node | 只影响 hanime，见「前置环境」 |
+| `Requires-Python` / `Unsupported` 之类版本报错 | Python 太老 | `python3 --version` 确认 ≥ 3.10 |
+| `Microsoft Visual C++ ... required` / `error: can't find Rust compiler` | 在源码编译而不是装现成包 | 一般是平台/Python 版本没有预编译包，见上面 Intel Mac 那条 |
+| pip 卡住 / `SSLError` / `ConnectionError` | 网络 | 换镜像：`-i https://pypi.tuna.tsinghua.edu.cn/simple` |
+
+### 2. 把这段模板丢给 AI（ChatGPT / Claude / DeepSeek 都行）
+
+装环境的问题几乎都是"平台 + 版本"的特定组合，说清楚这几样 AI 基本一次就能给准：
+
+```
+我在 <macOS 14 / Ubuntu 22.04 / Windows 11> 上装这个 Python 项目：
+<仓库链接>
+
+执行的命令：<原样贴你敲的那条>
+完整报错：<原样贴，别截断，别只说"报错了一大堆">
+
+python3 --version 输出：<...>
+node --version 输出：<...>
+已经试过：<...>
+```
+
+> 关键在**原样贴完整报错**。AI 猜不准通常就是因为只给了"报错了一堆"这种描述。
+
+### 3. 装好了但跑起来才出问题
+
+| 现象 | 原因 / 方向 |
+|---|---|
+| 两个 tube 站搜不出东西或超时 | 代理没跑起来、或端口不对。见「配置」 |
+| hanime 报 **「找不到 node 可执行文件」** | 装 Node，或它不在当前 PATH 里（nvm / Homebrew 装的常见）。可以直接指定绝对路径：`ADSKIPER_NODE_BIN=/opt/homebrew/bin/node python app.py` |
+| hanime 报「签名助手启动失败」 | 先跑 `python tools/hanime_probe.py`，它会一步步打印链路，能直接看出是"我们坏了"还是"站点改版了" |
+| 播放报「域名不在白名单内」 | 该站 CDN 不在白名单，用 `ADSKIPER_MEDIA_HOSTS` 加上（见「支持的站点」） |
+| 播放报「直链可能已过期」 | 签名 URL 约 2 小时过期，点「重载直链」即可 |
 
 ---
 
@@ -130,6 +200,7 @@ python app.py
 | `ADSKIPER_PORT` | `8000` | 监听端口 |
 | `ADSKIPER_MEDIA_HOSTS` | 空 | 追加媒体 CDN 域名后缀，逗号分隔 |
 | `ADSKIPER_RESOLVE_TTL` | `3000` | 直链解析缓存秒数（签名 URL 约 2 小时过期） |
+| `ADSKIPER_NODE_BIN` | `node` | 签名助手用的 Node 可执行文件。Node 是 nvm / Homebrew 装的、又不在当前 PATH 里时，用绝对路径指过去（如 `/opt/homebrew/bin/node`） |
 
 ---
 
@@ -495,7 +566,8 @@ SITES[SomeSite.key] = SomeSite
 | `GET /api/docs` | 自动生成的接口文档 |
 
 `?id=` 的形状**各站不同**（RedTube 纯数字、PornHub 是 viewkey、hanime 是 slug），
-所以只校验 URL 安全字符，页面 URL 由适配器的 `video_page_url()` 拼 —— 见下面「已知坑」。
+所以后端只校验 URL 安全字符，页面 URL 交给各站适配器的 `video_page_url()` 拼。
+想按 `id` 调这个接口，直接用 `/api/search` 或 `/api/random` 返回里的 `id` 字段即可。
 
 ---
 
@@ -547,8 +619,9 @@ MIT 的复用条件是**保留版权声明**，本项目的相关文件里都写
 hanime 的 `vendor.<hash>.min.js` 是**hanime.tv 自己的专有代码**，
 **MIT 覆盖不到它**（MIT 只保护参考项目作者自己写的那部分）。
 
-所以本项目**不分发、不打包**它，改为运行时从官方 CDN 抓取到 `.cache/hanime/`。
-这样本项目仓库里只有自己写的代码。若要再干净一步，把 `.cache/` 加进 `.gitignore`。
+所以本项目**不分发、不打包**它，改为运行时从官方 CDN 抓取到 `.cache/hanime/`
+（该目录已在 `.gitignore` 里）。
+这样本项目仓库里只有自己写的代码。
 
 ### 许可证 ≠ 用途合法（这条比上面所有都重要）
 
