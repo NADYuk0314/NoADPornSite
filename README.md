@@ -339,6 +339,14 @@ python tools/hanime_probe.py <slug>     # 指定 slug
 它会依次打印：vendor 地址 → 签名 → 握手 HTTP 状态 → 解密后的 `sources`。
 站点改版时先跑这个，能快速判断是"我们坏了"还是"站点变了"。
 
+它认主程序那两个环境变量（`ADSKIPER_PROXY` / `ADSKIPER_NODE_BIN`），
+所以「主程序怎么连、用哪个 node」可以直接照搬过来。不设 `ADSKIPER_PROXY`
+时同样默认 `127.0.0.1:7890`；用系统级 VPN（Shadowrocket / Surge）的话要显式直连：
+
+```bash
+ADSKIPER_PROXY= python tools/hanime_probe.py
+```
+
 ---
 
 ## 搜索格式：空格分隔多个词 = AND

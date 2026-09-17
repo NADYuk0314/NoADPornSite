@@ -56,6 +56,14 @@ VENDOR_FILE = CACHE_DIR / "vendor.js"
 
 PROXY = os.environ.get("ADSKIPER_PROXY", "http://127.0.0.1:7890").strip()
 
+# 启动签名助手用的 Node 可执行文件。**必须和 hanime.py 读同一个变量**：
+# Node 若是用 nvm / Homebrew 装的，而本脚本又从 GUI / launchd 之类的地方启动，
+# 那个进程的 PATH 里往往没有 node，这时用
+# ADSKIPER_NODE_BIN=/opt/homebrew/bin/node 指过去即可。
+# 探针是出问题时第一个要跑的工具，这里若不认这个变量，就会出现
+# 「主程序正常、探针报找不到 node」的反向结论 —— 和它的用途正好相反。
+NODE_BIN = os.environ.get("ADSKIPER_NODE_BIN", "node").strip() or "node"
+
 UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
@@ -152,7 +160,7 @@ class Signer:
 
     def __init__(self, vendor_path: Path) -> None:
         self.proc = subprocess.Popen(
-            ["node", str(SIGNER_JS), str(vendor_path)],
+            [NODE_BIN, str(SIGNER_JS), str(vendor_path)],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -226,6 +234,30 @@ class Signer:
 # 主流程
 # --------------------------------------------------------------------------- #
 
+def print_connect_hint(proxy: str | None) -> None:
+    """连不上时，按两种出口方案分别给出下一步。
+
+    原始报错只有一句 "Connection refused"，看不出是代理配置的问题 ——
+    而这恰恰是主程序出问题时最需要工具帮上忙的地方。
+    """
+    if proxy:
+        print(f"      代理 {proxy} 连不上。先确认代理客户端在跑；")
+        print("      若用的是系统级 VPN（Shadowrocket / Surge），应改直连：")
+        print("        ADSKIPER_PROXY= python tools/hanime_probe.py")
+    else:
+        print("      当前是直连模式。检查网络，或确认 VPN / 代理已连上；")
+        print("      也可以显式指定出口：")
+        print("        ADSKIPER_PROXY=http://127.0.0.1:7890 python tools/hanime_probe.py")
+
+
+def print_node_missing_hint() -> None:
+    """Popen 找不到 node 时给一句人话，而不是裸 traceback。"""
+    print(f"\n✗ 找不到 {NODE_BIN} —— hanime.tv 取流需要 Node.js 18+。")
+    print("      先确认它在 PATH 里（node --version 能打印版本）；")
+    print("      若 node 是 nvm / Homebrew 装的，用绝对路径指过去：")
+    print("        ADSKIPER_NODE_BIN=/opt/homebrew/bin/node python tools/hanime_probe.py")
+
+
 def main() -> int:
     slug = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_SLUG
     proxy = PROXY or None
@@ -236,10 +268,18 @@ def main() -> int:
             vendor = fetch_vendor(client)
         except Exception as e:  # noqa: BLE001
             print(f"\n✗ 取 vendor 失败: {type(e).__name__}: {e}")
+            if isinstance(e, httpx.TransportError):
+                print_connect_hint(proxy)
             return 1
 
         print("[3/5] 启动签名助手并取一组签名 …")
-        signer = Signer(vendor)
+        try:
+            signer = Signer(vendor)
+        except FileNotFoundError:
+            # hanime.py 那边把 Popen 的 FileNotFoundError 包成了 SignerError，
+            # 不然异常会一路逃逸成裸 500。这里保持一致，别吐 traceback。
+            print_node_missing_hint()
+            return 1
         try:
             if not signer.wait_ready():
                 print("✗ 签名助手启动失败")
