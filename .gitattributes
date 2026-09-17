@@ -1,0 +1,12 @@
+# 换行符策略。
+#
+# 仓库里统一按 LF 存（Python / JS / HTML / Markdown 都不挑换行符）。
+* text=auto
+
+# ⚠️ 这两条是踩出来的，别删：Windows 批处理**必须是 CRLF**。
+# LF-only 的 .bat 会让 `if errorlevel 1 ( ... )` / `for` 这类多行块解析错乱 ——
+# 实测块内的 echo / set / goto 全部失效，报 "'xxx' is not recognized"。
+# start.bat 里有三个这样的错误分支，在 LF 下全是坏的。
+# 显式写死 eol=crlf，保证任何人 clone / 下载 ZIP 出来都能直接双击。
+*.bat text eol=crlf
+*.cmd text eol=crlf

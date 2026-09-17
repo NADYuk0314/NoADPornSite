@@ -1,0 +1,10 @@
+# hanime 的 vendor 文件是 hanime.tv 的专有代码，运行时抓取、不随项目分发。
+# 见 README「许可证」一节。
+.cache/
+tools/hanime_cache/
+
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.log

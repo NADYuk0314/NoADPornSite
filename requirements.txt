@@ -1,0 +1,11 @@
+# 运行依赖 —— 全部是宽松许可（MIT / BSD / Apache / 公有领域），可用于商用。
+# 逐个的许可证说明见 README.md 的「许可证」一节。
+fastapi>=0.141
+uvicorn[standard]>=0.53
+httpx>=0.28
+yt-dlp>=2026.8.19
+# hanime.tv 取流要拆它的 AES-256-GCM 消息封装（Apache-2.0 OR BSD-3-Clause）
+cryptography>=42
+
+# 额外需要（不通过 pip）：
+#   node       —— hanime 的签名助手用。见 hanime_signer.js / README「hanime.tv」一节
