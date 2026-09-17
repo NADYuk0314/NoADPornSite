@@ -1,10 +1,9 @@
 # NoADPornSite
 
-本地视频直链播放器。**重在线播放、轻下载管理、无媒体库管理。**
+本地视频直链播放器。**重在线无广播放、轻下载管理、无媒体库管理。**
 
-RedTube 的预播广告是「4 秒后可跳过」——等 4 秒再自动点按钮没什么意义。
-真正有价值的做法是**根本不进入广告播放链路**：站点把正片的 CDN 直链明文放在页面里，
-把这个直链交给自己的播放器，广告就从来不曾被请求过。这个项目做的就是这件事。
+本项目的核心是**根本不进入广告播放链路**：站点把正片的 CDN 直链明文放在页面里，
+把这个直链交给自己的播放器，广告就从来不曾被请求过。
 
 ```
 浏览器 (127.0.0.1:8000)          只用连本机 —— 不需要代理、不需要翻墙
@@ -61,7 +60,7 @@ node --version       # 需要 >= 18（可选）
 
 两条路，选一条就行 —— 跑起来的是同一个东西。
 
-### 方式一：双击 `start.bat`（Windows，最快）
+### 方式一：双击 `start.bat`（仅Windows，最快）
 
 1. 装好 Python（3.10+，且进了 PATH）
 2. **双击 `start.bat`**
@@ -88,7 +87,7 @@ node --version       # 需要 >= 18（可选）
 > python -m pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 > ```
 
-### 方式二：自己装依赖再启动（跨平台）
+### 方式二：自己装依赖再启动（跨平台，mac、linux）
 
 `start.bat` 只是把下面这两条命令包了一层 —— 效果完全一样：
 
@@ -134,93 +133,6 @@ python app.py
 
 ---
 
-## 为什么这么设计
-
-### 1. yt-dlp 当库用，不 fork
-
-```python
-import yt_dlp
-ydl = yt_dlp.YoutubeDL({"proxy": PROXY, "skip_download": True})
-info = ydl.extract_info(url, download=False)
-```
-
-yt-dlp 一年发布 600+ 个版本，几乎每天在修各站解析器。fork 等于自己维护 60 万行代码的分叉。
-需要扩展就写 **plugin**：
-
-```
-%APPDATA%\yt-dlp\plugins\<包名>\yt_dlp_plugins\extractor\myplugin.py
-```
-
-```python
-from yt_dlp.extractor.redtube import RedTubeIE
-
-class MyRedTubeIE(RedTubeIE, plugin_name='myplugin'):
-    """plugin_name 会让它替换掉内置的 RedTubeIE，无需改源码"""
-    def _real_extract(self, url):
-        return super()._real_extract(url)
-```
-
-extractor 插件自动生效（URL 匹配就调用），且优先级高于内置解析器。
-⚠️ 所有插件都会被无条件导入执行，**不要装来路不明的插件**。
-
-### 2. 为什么媒体要走后端中转，而不是让浏览器直接连 CDN
-
-| 原因 | 说明 |
-|---|---|
-| **绕开 GFW** | CDN 域名（`*.rdtcdn.com`）在国内同样被墙。中转后浏览器只连 `127.0.0.1` |
-| **绕开 CORS** | CDN 完全不返回 `Access-Control-Allow-Origin`。中转后同源，顺带把 `hls.js` 的路也堵上了 |
-| **统一带 Referer** | `<video src>` 无法自定义请求头，所以用 `&r=<视频页URL>` query 参数传给后端转发 |
-| **SSRF 防护** | 白名单只放行已知媒体 CDN，避免本地服务被恶意网页当跳板 |
-
-### 3. 为什么只用渐进式 MP4，不用 HLS
-
-实测 RedTube 的 CDN 不返回任何 CORS 头。`<video src="mp4">` 不受 CORS 限制，能直接播；
-但 `hls.js` 要用 XHR 取 m3u8，会被 CORS 挡死。所以 `_normalize_info()` 只保留渐进式 MP4。
-
-### 4. 广告为什么消失
-
-RedTube 有两条互不相干的链路：
-
-```
-广告链路：  /_xa/ads?zone_id=...  ──▶ 播放器 AdRoll 模块 ──▶ 4 秒后可跳过
-正片链路：  /media/mp4?s=<签名>    ──▶ CDN 直链（1080p/720p/...）
-```
-
-本项目只走第二条。广告请求从未发出，`ads_test.js`、`ab_detection`、TrafficJunky 蜜罐
-**全都不执行**，因为根本不加载站点的页面和 JS。
-
----
-
-## 已知坑（都踩过了）
-
-| 现象 | 原因 | 处理 |
-|---|---|---|
-| `/api/sites` 返回 **502 Bad Gateway** | httpx 默认 `trust_env=True`，会通过 `getproxies()` 读到 **Windows 注册表里的系统代理**，连 `127.0.0.1` 的请求都被丢给 Clash | 已显式设 `trust_env=False`。自己写测试脚本时也要注意 |
-| 所有视频都报「没有可用的 MP4 直链」 | RedTube 的渐进式 MP4 条目 yt-dlp 给的 `vcodec` 是 `None`（未知），若按 `vcodec == 'none'` 判纯音频会误伤 | 只把字符串 `'none'` 当纯音频 |
-| 播放到一半报错 | 直链签名约 2 小时过期 | 点「重载直链」重新解析，缓存 TTL 默认 3000 秒 |
-| 搜索页拿到年龄门 | 缺年龄确认 cookie | 适配器里带 `accessAgeDisclaimerRT=1; accessRT=1` |
-| 某一档清晰度**拖动进度条失效** | 实测 `240P` 那档的 CDN 边缘节点**直接忽略 Range**，返回 `200` + 整个文件（1080p/720p/480p 都是正常的 `206`） | CDN 侧行为，无解。换一档即可；`200` 不影响从头播放 |
-| 控制台刷 `socket.send() raised exception.` | 客户端中途断开（切清晰度/关页面）时 uvicorn 的日志 | 已用 `BackgroundTask` 关闭上游连接，正常情况下不再出现 |
-| **很多封面是全黑的** | 封面 CDN 有两道关卡：① `pix-cdn77.rdtcdn.com` **强制校验 Referer**，不带就 `403`（返回 868 字节 HTML 错误页）——**视频 CDN 不校验，只有图片 CDN 校验**；② CDN77 后端偶发 `502`，此时**同一视频的其他尺寸仍是好的** | ① 后端按域名后缀兜底附上 `Referer`（`DEFAULT_REFERER_BY_SUFFIX`）；② 解析器把一个卡片里的**所有封面尺寸**都收集成候选，前端逐个回退；③ 全挂了再调 `/api/thumb` 取视频页 `og:image`；④ 彻底失败才显示「封面不可用」占位 |
-| 最后一张卡的封面候选暴涨到 30 个 | 卡片是按 `<li … data-video-id>` 切分的，**最后一块会一直延伸到页面末尾**（后面没有下一个卡片可供切分），把整页尾部的 `<img>` 全收了进来 | 每块按 `</li>` 截断。正常应为 2 个候选 |
-| `/api/resolve?id=<PornHub 的 id>` 报 **400「id 必须为纯数字」** | 早期实现假设"id 就是数字"，但 **PornHub 的 id 是 viewkey（十六进制串，如 `68069b6b253eb`）**，一刀切全被拒了。`/api/thumb` 因为没有这个假设所以一直是好的 | 改成只校验 URL 安全字符，页面 URL 交给适配器的 `video_page_url()` 拼（PornHub 拼成 `view_video.php?viewkey=`）。**前端一直用 `?url=` 所以没暴露**，但 API 层是可复现的 |
-
----
-
-## 封面为什么需要三级回退
-
-RedTube 列表页的封面走 `pix-cdn77.rdtcdn.com`（CDN77），实测有这些脾气：
-
-1. **必须带 Referer**。不带 → `403`。带上 `https://www.redtube.com/` → `200`。
-2. **`hash=` 是绑定尺寸签名的**，不能自己把 `rs:fit:304:171` 改成 `rs:fit:640:360` 重算 —— 改了必然 `403`。
-3. **CDN77 后端会偶发 `502`**，而且同一个视频**只有部分尺寸**受影响：实测 `304:171` 挂了而 `224:126` 是好的。
-4. 列表页里每个视频现成可用的尺寸就 2~4 个（`data-src` / `data-o_thumb` / webp / jpg）。
-
-所以顺序是：**首选尺寸 → 其余卡片内候选 → 视频页 `og:image`（`rs:fit:1280:720`，走另一条路径）→ 占位**。
-`/api/thumb` 只在前面全失败时才被调用，不影响正常加载；结果缓存 6 小时。
-
----
-
 ## 支持的站点
 
 三个站点，分属**两种截然不同的形态**：
@@ -238,7 +150,7 @@ hanime 完全不同，逻辑单独放在 `hanime.py` 里，**它挂了不影响�
 
 ### ⚠️ 站点清单只管"按钮上能选什么"
 
-`SUPPORTED_SITES` 只决定界面上的站点按钮。前两个站走 yt-dlp，所以**粘任何 yt-dlp
+`SUPPORTED_SITES` 只决定界面上的站点按钮。前两个站走 yt-dlp，所以理论上**粘任何 yt-dlp
 支持的链接都能播** —— 哪怕不在清单里。
 
 ### 为什么只有这三个站能"搜关键词"
@@ -312,26 +224,6 @@ MIT 参考项目），所以本项目**不打包、不分发**它 —— 改由 
 握手响应里带 `is_preroll_enabled` / `preroll_urls`（实测指向 TrafficJunky 等），
 页面里还有 `adv1.clickadu.net` 的 iframe 广告。本项目**只取 `sources`，完全忽略这些
 字段**，也不加载站点页面 —— 所以三类广告一个都不会出现。
-
-### 实测要点
-
-| 项 | 结论 |
-|---|---|
-| 目录接口 | 4.21 MB / 3404 条 / 1.2s，**忽略所有查询参数**（永远返回全量） |
-| 标签 | **61 个**，每条带真实 `tags` 数组 → 可做**精确多标签 AND**（tube 站做不到） |
-| 术语差异 | 没有 `lesbian`（对应 **`yuri`**）、没有 `outdoor`（最接近 **`public sex`**） |
-| m3u8 | 相对路径 `/hls/...`，VOD，AES-128 |
-| AES 密钥 | `ct.htv-services.com/sign.bin`，16 字节，内容是**固定常量** `"0123456701234567"` |
-| 分片 | `.html` 伪装成网页，实为 TS 数据；**不需要 Referer** |
-| **分片 CDN** | **轮换域名池**！抽 41 个播放列表出现 **48 个不同主机**，全部形如 `p32.htv-dragonlands.com` / `etheirys.htv-hydaelyn-13.com`。见下节 |
-| 被墙情况 | `hanime.tv` 与 `auth.hanime.tv` 在国内被墙（需代理）；`guest.freeanimehentai.net` **没被墙** |
-
-### 那个轮换 CDN 域名池（踩过的坑）
-
-| 现象 | 原因 | 处理 |
-|---|---|---|
-| 部分视频分片 403「域名不在白名单内」 | 一开始只把抽样里出现的 `htv-tsukuyomi.com` 加进白名单，后来发现实际有 40+ 个主机 | 改用**正则白名单** `^(?:[a-z0-9-]+\.)*htv-[a-z0-9-]+\.com$` |
-| 部分分片 502，且代理/直连都报 SSL EOF | 有的分片 CDN 挂在 **Cloudflare** 后面，代理节点在 TLS 层被拒；而**同一个主机直连也会偶发 TLS 重置**（实测同一 URL 连发 3 次：2 次 200、1 次 ConnectError，底层是 anyio 的 `BrokenResourceError`，与请求头无关） | `_open_upstream()` 按「代理 → 直连 → 代理 → 直连」重试，每轮间隔递增。直连用**一次性客户端**（复用的 AsyncClient 在 `send(stream=True)` 下会直接抛 ConnectError） |
 
 ### 前端适配
 
@@ -414,20 +306,6 @@ def encode_query(q: str) -> str:
 
 最多取 8 个词（`MAX_TERMS`），防止拼出离谱的长查询。
 
-### 为什么不做元数据筛选
-
-实测过两个站的元数据能力，结论是**投入产出比太低**：
-
-| | RedTube | PornHub |
-|---|---|---|
-| 分类体系 | ❌ 没有（`/tags/x` 是 404） | ✅ 98 个分类，但 **单选**——`?c=27&c=65` 只认最后一个 |
-| 分类 + 关键词混用 | — | ❌ 直接 404（`?search=x&c=65` 与 `?c=27&search=x` 都是 Page Not Found） |
-| 时长/清晰度/取向 | ❌ 死参数 | 部分可用（`hd=1`、`p=professional`） |
-| 时间范围 | ✅ `period=` | ❌ 搜索页无效 |
-
-**两站都无法用元数据表达"必须同时属于分类 A 和分类 B"**，而这恰好是"多词 AND"能表达的语义。
-所以只保留了多词 AND。
-
 ---
 
 ## 随机推荐（关键词为空时的默认内容）
@@ -478,27 +356,7 @@ def _pick_random(pool, count, site_key):
 
 （RedTube 只有 225 条候选，12 轮之后自然开始饱和；hanime 池子最大所以一个不重。）
 
-### 顺带加的一道过滤：不要 6 秒的短片
-
-随机抽样会把 PornHub 上 `0:06` 的剪辑翻出来，混在推荐里看着像坏了。
-所以时长**能解析出来**时要求至少 1 分钟（`MIN_RANDOM_SECONDS`）：
-
-```python
-def _long_enough(item):
-    secs = _dur_seconds(item.get("duration", ""))
-    return secs is None or secs >= MIN_RANDOM_SECONDS   # 时长未知的一律放行
-```
-
-hanime 的目录里没有时长字段（`duration` 为空），所以不受这条影响。
-
-### 入口 URL 是"猜"的，所以要容错
-
-PornHub 的页码上限**是浮动的**：实测 `o=mv/cm/tr` 到第 40 页都还在，但
-`o=ht` 第 20 页还行、**第 25 页就 404**。所以：
-
-- `BROWSE_MAX_PAGE = 18` 留出安全余量（4 档 × 18 页 ≈ 3000 条候选，够用了）
-- 猜错也不报错：一轮里的入口全挂了就**换一批再猜一轮**；同一轮挂掉一个入口不算致命；
-  新页全挂了但累积池里还有货就凑合用（`_browse_rows`）
+---
 
 ### 前端接线
 
@@ -641,7 +499,7 @@ SITES[SomeSite.key] = SomeSite
 
 ---
 
-## 许可证（"能不能商用"）
+## 许可证
 
 ### 本项目本身：MIT
 
@@ -699,8 +557,6 @@ hanime 的 `vendor.<hash>.min.js` 是**hanime.tv 自己的专有代码**，
 - 绕过 hanime.tv 的签名访问控制，可能触及其服务条款中的**反规避条款**
 - hanime.tv 播放的是**未授权分发的内容**；本项目也不加载任何站点页面、不下发其广告
 - 这些都是**独立于代码许可证**的法律问题
-
-**自己用 和 商业化出售，法律风险完全不是一个量级。** 一份许可证清单不能替代这个判断。
 
 ---
 
