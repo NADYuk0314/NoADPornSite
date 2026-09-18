@@ -40,19 +40,20 @@ import html as html_mod
 import os
 import random
 import re
+import shutil
 import threading
 import time
 from collections import deque
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote, urljoin, urlparse
+from urllib.parse import quote, urlencode, urljoin, urlparse
 
 import httpx
 import yt_dlp
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from starlette.background import BackgroundTask
 
 import hanime as hanime_mod
@@ -68,6 +69,27 @@ PROXY: str = os.environ.get("ADSKIPER_PROXY", "http://127.0.0.1:7890").strip()
 HOST: str = os.environ.get("ADSKIPER_HOST", "127.0.0.1").strip()
 PORT: int = int(os.environ.get("ADSKIPER_PORT", "8000"))
 RESOLVE_TTL: int = int(os.environ.get("ADSKIPER_RESOLVE_TTL", "3000"))
+
+
+def _find_ffmpeg() -> str | None:
+    """找 ffmpeg 可执行文件。找不到返回 None。
+
+    **只有 hanime 的「另存为」需要它** —— tube 站的视频是单个 MP4，直接中转即可；
+    hanime 是 HLS（实测一部番剧 142 个 AES-128 加密分片），必须有人把它们解密、
+    拼接、再封装成一个容器，这件事交给 ffmpeg。
+    没装 ffmpeg 时其余功能完全不受影响，只是 hanime 点下载会得到一句明确报错。
+
+    Node 那边用的是 ADSKIPER_NODE_BIN，这里对称地用 ADSKIPER_FFMPEG 指定绝对路径，
+    应对「ffmpeg 不在 PATH 里」的情况。
+    """
+    env = os.environ.get("ADSKIPER_FFMPEG", "").strip()
+    if env:
+        return env if Path(env).is_file() else None
+    return shutil.which("ffmpeg")
+
+
+# None = 没找到，下载 HLS 时会给出安装提示
+FFMPEG: str | None = _find_ffmpeg()
 
 UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -857,6 +879,9 @@ async def api_sites() -> JSONResponse:
         "count": len(sites),
         "search_capable": [s["key"] for s in sites if s["supports_search"]],
         "sites": sites,
+        # 没找到就是 None。前端据此判断 hanime 的「下载」能不能用
+        # （tube 站是单个 MP4，不需要 ffmpeg）
+        "ffmpeg": FFMPEG,
     })
 
 
@@ -1134,6 +1159,38 @@ def _random_payload(adapter: type[SiteAdapter], picks: list[dict[str, Any]]) -> 
     }
 
 
+def page_url_from_id(site: str, vid: str) -> str:
+    """由站点 id 拼出视频页 URL。
+
+    id 的形状**各站不同**（RedTube 纯数字、PornHub 是 viewkey、hanime 是 slug），
+    所以只校验 URL 安全字符，具体怎么拼交给适配器的 video_page_url()。
+    """
+    adapter = get_site(site)
+    if adapter is None:
+        raise HTTPException(404, f"未知站点：{site}")
+    if getattr(adapter, "search_kind", "paged") == "catalog":
+        # hanime 的 slug 是字母数字连字符
+        if not re.fullmatch(r"[A-Za-z0-9\-_]+", vid):
+            raise HTTPException(400, "id 格式非法")
+    elif not re.fullmatch(r"[A-Za-z0-9_\-]{1,64}", vid):
+        raise HTTPException(400, "id 格式非法")
+    return adapter.video_page_url(vid)
+
+
+async def resolve_any(url: str, refresh: bool = False) -> dict[str, Any]:
+    """resolve 一个视频页 URL，返回统一形状的 info。
+
+    两条路：hanime 走自研的 WASM 签名握手，其余交给 yt-dlp。
+    /api/resolve 和 /api/download 都用它，保证两边拿到的东西完全一致。
+    """
+    if not re.match(r"^https?://", url):
+        raise HTTPException(400, "url 必须是 http/https")
+    # hanime 不走 yt-dlp：取流要过 WASM 签名的握手，见 hanime.py
+    if hanime_mod.slug_from_url(url):
+        return await run_in_threadpool(_resolve_hanime, url)
+    return await resolve(url, refresh=refresh)
+
+
 @app.get("/api/resolve")
 async def api_resolve(
     url: str | None = Query(None, description="视频页面 URL"),
@@ -1144,30 +1201,9 @@ async def api_resolve(
     if not url:
         if not id:
             raise HTTPException(400, "需要 url 或 id 参数")
-        adapter = get_site(site)
-        if adapter is None:
-            raise HTTPException(404, f"未知站点：{site}")
-        if getattr(adapter, "search_kind", "paged") == "catalog":
-            # hanime 的 id 是 slug（字母数字连字符），不是纯数字
-            if not re.fullmatch(r"[A-Za-z0-9\-_]+", id):
-                raise HTTPException(400, "id 格式非法")
-            url = adapter.video_page_url(id)
-        else:
-            # ⚠️ 别再要求"纯数字"：PornHub 的 id 是 viewkey（十六进制串），
-            #    一刀切会把它的 id 全 400 掉。/api/thumb 早就是这么做的 ——
-            #    只校验 URL 安全字符，具体怎么拼页面 URL 交给适配器自己。
-            if not re.fullmatch(r"[A-Za-z0-9_\-]{1,64}", id):
-                raise HTTPException(400, "id 格式非法")
-            url = adapter.video_page_url(id)
+        url = page_url_from_id(site, id)
 
-    if not re.match(r"^https?://", url):
-        raise HTTPException(400, "url 必须是 http/https")
-
-    # hanime 不走 yt-dlp：取流要过 WASM 签名的握手，见 hanime.py
-    if hanime_mod.slug_from_url(url):
-        return JSONResponse(await run_in_threadpool(_resolve_hanime, url))
-
-    return JSONResponse(await resolve(url, refresh=refresh))
+    return JSONResponse(await resolve_any(url, refresh))
 
 
 def _resolve_hanime(url: str) -> dict[str, Any]:
@@ -1334,6 +1370,7 @@ async def api_media(
     request: Request,
     u: str = Query(..., description="上游媒体 URL"),
     r: str | None = Query(None, description="要转发给 CDN 的 Referer（视频页 URL）"),
+    dl: str = Query("", description="传文件名则作为附件下载（Content-Disposition）"),
 ):
     """Range-aware 流式中转。视频、缩略图都走这里。"""
     if not re.match(r"^https?://", u):
@@ -1385,6 +1422,9 @@ async def api_media(
             out[k] = v
 
     out.setdefault("accept-ranges", "bytes")
+    # 「另存为」：tube 站是单个 MP4，走这里直接带上附件头即可，无需 ffmpeg
+    if dl:
+        out["content-disposition"] = attachment_header(dl)
     # 图片可以长缓存，视频不缓存（签名 URL 会过期）
     if ctype.startswith("image/"):
         out["cache-control"] = "public, max-age=86400"
@@ -1407,6 +1447,173 @@ async def api_media(
         status_code=upstream.status_code,
         headers=out,
         background=BackgroundTask(_cleanup),
+    )
+
+
+# --------------------------------------------------------------------------- #
+# 「另存为」
+# --------------------------------------------------------------------------- #
+
+def safe_filename(title: str, ext: str) -> str:
+    """把视频标题变成一个安全的文件名。中文保留，只去掉路径分隔符和控制字符。"""
+    name = re.sub(r'[\\/:*?"<>|\r\n\t]', "_", (title or "").strip())
+    name = re.sub(r"\s+", " ", name).strip(" .")
+    # 有的站点标题自带扩展名，别拼成 "xxx.mp4.mp4"
+    name = re.sub(r"\.(mp4|mkv|webm|avi|mov|ts|m4v)$", "", name, flags=re.I)
+    if len(name) > 120:
+        name = name[:120].rstrip(" .")
+    return f"{name or 'video'}.{ext}"
+
+
+def attachment_header(filename: str) -> str:
+    """构造 Content-Disposition。
+
+    中文标题必须同时给两套：老式 ``filename=`` 是 ASCII 兜底（非 ASCII 会被丢掉），
+    RFC 5987 的 ``filename*=UTF-8''`` 才是现代浏览器真正用的那个 —— 只写前者的话
+    中文标题会存成乱码或直接变成 "video"。
+    """
+    stem, _, ext = filename.rpartition(".")
+    ascii_stem = stem.encode("ascii", "ignore").decode().strip(" ._")
+    # 纯中文/日文标题会被 ascii 过滤得只剩零星字符（甚至只剩个数字），这时退回 video
+    if len(ascii_stem) < 2:
+        ascii_stem = "video"
+    ascii_name = f"{ascii_stem}.{ext}" if ext else ascii_stem
+    return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(filename, safe='')}"
+
+
+async def _download_hls(m3u8: str, info: dict[str, Any], page_url: str) -> Response:
+    """用 ffmpeg 把 HLS 边解密边封装成 MP4，**流式**回给浏览器（不落盘）。
+
+    为什么必须流式：一部番剧实测 142 个分片、约 294 MB。先落盘的话要么占 300MB
+    磁盘，要么让用户对着一个没有任何反馈的按钮等半分钟。
+    """
+    if not FFMPEG:
+        raise HTTPException(
+            503,
+            "没有找到 ffmpeg。hanime 是 HLS（一部番剧上百个 AES-128 加密分片），"
+            "「另存为」需要 ffmpeg 来解密和封装；也可以用 ADSKIPER_FFMPEG "
+            "指定它的绝对路径。RedTube / PornHub 是单个 MP4，不需要 ffmpeg。",
+        )
+
+    # 关键：让 ffmpeg 读**我们自己代理改写过的**播放列表。这样分片和 AES 密钥都经
+    # /api/media 转发，于是 ffmpeg 自己既不用配代理、也不受域名白名单影响。
+    playlist = f"http://127.0.0.1:{PORT}/api/media?" + urlencode({"u": m3u8, "r": page_url})
+
+    cmd = [
+        FFMPEG, "-hide_banner", "-loglevel", "error",
+        "-nostdin",              # 别让 ffmpeg 去抢我们的 stdin
+        "-i", playlist,
+        "-c", "copy",
+        # HLS 分片里的 AAC 带 ADTS 头，塞进 MP4 必须剥掉。写普通文件时 ffmpeg 会
+        # **自动补**这个滤镜，输出到管道时不会 —— 实测不加会报 "Malformed AAC
+        # bitstream detected" 并且只产出 2KB 垃圾。
+        "-bsf:a", "aac_adtstoasc",
+        # 管道不可 seek，"+faststart" 会直接报 "muxer does not support non seekable
+        # output"。改用 fragmented MP4：moov 写在最前面（实测偏移 32），能边生成边发。
+        "-movflags", "frag_keyframe+empty_moov+default_base_moof",
+        "-f", "mp4", "pipe:1",
+    ]
+    proc = await asyncio.create_subprocess_exec(
+        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+    )
+
+    # stderr 必须有人一直读：管道写满会把 ffmpeg 卡死，而且失败时要靠它给出原因
+    errbuf: list[bytes] = []
+
+    async def _drain_stderr() -> None:
+        assert proc.stderr is not None
+        while True:
+            b = await proc.stderr.read(4096)
+            if not b:
+                break
+            errbuf.append(b)
+
+    err_task = asyncio.create_task(_drain_stderr())
+
+    # 先等第一块数据再决定返回什么：ffmpeg 一上来就失败（URL 失效、站点改版）时，
+    # 这样还来得及返回一个正常的 JSON 错误，而不是让浏览器下到一个 0 字节的坏文件。
+    assert proc.stdout is not None
+    try:
+        first = await asyncio.wait_for(proc.stdout.read(65536), timeout=45)
+    except asyncio.TimeoutError:
+        proc.kill()
+        raise HTTPException(504, "ffmpeg 45 秒内没有产出任何数据，可能上游播放列表有问题")
+
+    if not first:
+        await proc.wait()
+        err_task.cancel()
+        detail = b"".join(errbuf).decode("utf-8", "replace").strip()
+        raise HTTPException(502, f"ffmpeg 没能产出视频：{detail[:300] or '未知错误'}")
+
+    name = safe_filename(info.get("title") or "", "mp4")
+
+    async def _cleanup() -> None:
+        """客户端下完 / 中途取消时收尾。用 BackgroundTask 保证一定跑到。"""
+        if proc.returncode is None:
+            proc.kill()
+        try:
+            await proc.wait()
+        except Exception:  # noqa: BLE001
+            pass
+        err_task.cancel()
+
+    async def body():
+        try:
+            yield first
+            while True:
+                chunk = await proc.stdout.read(65536)
+                if not chunk:
+                    break
+                yield chunk
+        except Exception:  # noqa: BLE001
+            # 客户端中途取消下载是正常情况，静默即可
+            pass
+
+    return StreamingResponse(
+        body(),
+        media_type="video/mp4",
+        headers={
+            "content-disposition": attachment_header(name),
+            "cache-control": "no-store",
+        },
+        background=BackgroundTask(_cleanup),
+    )
+
+
+@app.get("/api/download")
+async def api_download(
+    url: str | None = Query(None, description="视频页面 URL"),
+    id: str | None = Query(None, description="站点视频 ID（配合 site）"),
+    site: str = Query("RedTube"),
+    quality: str = Query("", description="清晰度 label（如 720p）；留空 = 最高"),
+) -> Response:
+    """「另存为」一个视频。两种形态走两条路：
+
+    * **tube 站** —— 单个渐进式 MP4。307 跳到 /api/media 并带上附件头，
+      复用那边已经写好的 Range / Referer / 域名白名单逻辑，一行都不用重复。
+    * **hanime** —— HLS，交给 ffmpeg（见 _download_hls）。
+    """
+    if not url:
+        if not id:
+            raise HTTPException(400, "需要 url 或 id 参数")
+        url = page_url_from_id(site, id)
+
+    info = await resolve_any(url)
+    formats = info.get("formats") or []
+    if not formats:
+        raise HTTPException(502, "这个视频没有可下载的清晰度")
+
+    # 选清晰度：按 label 精确匹配；匹配不上就用第一个
+    # （yt-dlp 那条路已按高度降序，hanime 那条也是 720p 在前，所以第一个即最高）
+    fmt = next((f for f in formats if f.get("label") == quality), formats[0])
+
+    if fmt.get("is_hls"):
+        return await _download_hls(fmt["url"], info, url)
+
+    name = safe_filename(info.get("title") or "", "mp4")
+    return RedirectResponse(
+        "/api/media?" + urlencode({"u": fmt["url"], "r": url, "dl": name}),
+        status_code=307,
     )
 
 

@@ -55,6 +55,15 @@ if errorlevel 1 (
     echo.
 )
 
+REM ---------- 5. ffmpeg：只有 hanime 的「下载」需要，缺了不拦 ----------
+ffmpeg -version >nul 2>&1
+if errorlevel 1 (
+    echo [提示] 没找到 ffmpeg —— 播放、以及 RedTube / PornHub 的下载都不受影响，
+    echo        但 hanime 的视频「另存为」需要它（要把上百个加密分片解密再封装）。
+    echo        下载后把 bin 目录加进 PATH：https://www.gyan.dev/ffmpeg/builds/
+    echo.
+)
+
 echo 启动中... 浏览器打开 http://127.0.0.1:8000
 echo 按 Ctrl+C 停止
 echo.

@@ -223,6 +223,7 @@
         <div class="ptags" id="ptags" hidden></div>
       </div>
       <div style="display:flex;gap:9px">
+        <button class="btn" id="dl">下载</button>
         <button class="btn" id="reload">重载直链</button>
         <button class="btn" id="back">← 返回列表</button>
       </div>
@@ -310,6 +311,7 @@ let tagsExpanded = false;
 let hls = null;                    // 当前 hls.js 实例
 let booted = false;                // init 跑完之前不自动发随机推荐请求（避免和首次加载重复）
 const RANDOM_COUNT = 10;           // 随机推荐一次给几条
+let hasFfmpeg = false;             // 后端找没找到 ffmpeg（决定 HLS 能不能「另存为」）
 
 const LS = {
   get(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
@@ -1170,6 +1172,38 @@ $("back").onclick = () => {
   else if (!state.q && !state.random) show($("empty"), true);
 };
 $("reload").onclick = () => { if (state.item) loadInfo(state.item.url, true); };
+
+// 「下载」= 另存为当前清晰度。
+// 用隐藏 iframe 触发，而不是 location.href：万一后端返回的是错误 JSON
+// （比如没装 ffmpeg），它会渲染在看不见的 iframe 里，不会把整个播放页替换成一段 JSON。
+$("dl").onclick = () => {
+  if (!state.item || !state.info) return;
+  const f = state.info.formats[state.fmt] || {};
+
+  // HLS 要先把上百个加密分片解密再封装，这件事只有 ffmpeg 干得了
+  if (f.is_hls && !hasFfmpeg) {
+    ovl("没有找到 ffmpeg —— hanime 是 HLS（很多个 AES-128 加密分片），"
+      + "「另存为」需要它来解密和封装。装好 ffmpeg 后重启服务即可；"
+      + "RedTube / PornHub 是单个 MP4，不需要 ffmpeg。", true, false);
+    return;
+  }
+
+  const p = new URLSearchParams({
+    url: state.item.url,
+    site: state.item.site || state.site,
+    quality: f.label || "",
+  });
+  const fr = document.createElement("iframe");
+  fr.style.display = "none";
+  fr.src = "/api/download?" + p.toString();
+  document.body.appendChild(fr);
+  setTimeout(() => fr.remove(), 10 * 60 * 1000);   // 别过早移除，否则大文件会被中断
+
+  ovl(f.is_hls
+    ? "已开始下载 —— ffmpeg 正在边解密边封装，进度看浏览器自己的下载栏。"
+    : "已开始下载 —— 进度看浏览器自己的下载栏。", false, false);
+  setTimeout(hideOvl, 3000);
+};
 $("ovlbtn").onclick = () => { if (state.item) loadInfo(state.item.url, true); };
 
 const vid = $("video");
@@ -1205,6 +1239,7 @@ document.addEventListener("keydown", (e) => {
     siteList = j.sites || [];
     searchCapable = siteList.filter((s) => s.supports_search).map((s) => s.name);
     siteList.forEach((s) => siteByKey.set(s.key, s));
+    hasFfmpeg = !!j.ffmpeg;      // 只有 hanime 的 HLS 下载需要它
 
     // 恢复上次选的站点
     const saved = LS.get("site", null);

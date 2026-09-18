@@ -25,29 +25,36 @@
 |---|---|---|---|
 | **Python** | **3.10 或更新** | 跑后端 | 完全起不来 |
 | **Node.js** | **18 或更新** | hanime.tv 的 WASM 签名助手 | **另外两个站照常可用**，只有 hanime 取流失败 |
+| **ffmpeg** | 任意较新版本 | 下载 hanime 视频时解密并封装 | **播放和另两个站的下载照常可用**，只有 hanime 点「下载」会报错 |
 
 **Python 3.10 是硬下限**：`fastapi` / `uvicorn` / `starlette` / `anyio` / `click` / `yt-dlp`
 声明的 `Requires-Python` 全是 `>=3.10`，低于这个版本 pip 根本装不上。
 
-**Node 是可选的**：只有 hanime.tv 需要它。不装也能正常用。
+**Node 和 ffmpeg 都是可选的**，各自只影响一个功能：
+
+| 缺什么 | 影响 | 不影响 |
+|---|---|---|
+| 没有 Node | hanime 播不了（取流要签名） | RedTube / PornHub 的播放和下载 |
+| 没有 ffmpeg | hanime 下载不了（HLS 要解密封装） | 全部播放功能；RedTube / PornHub 的下载 |
 
 自己确认一下（macOS / Linux 上大多只有 `python3`，没有 `python`）：
 
 ```bash
 python3 --version    # 需要 >= 3.10
 node --version       # 需要 >= 18（可选）
+ffmpeg -version      # 可选，装了才能下载 hanime 的视频
 ```
 
 ### 怎么装
 
-Windows 的两个安装包直接下；**macOS / Linux 那两行是按开源圈最常见的做法给的，
+Windows 的安装包直接下；**macOS / Linux 那两行是按开源圈最常见的做法给的，
 我没在对应系统上实测过**：
 
-| 系统 | Python | Node |
-|---|---|---|
-| **Windows** | [python.org](https://www.python.org/downloads/) 安装包，**务必勾选 `Add python.exe to PATH`** | [nodejs.org](https://nodejs.org/) 安装包 |
-| **macOS**<br>（未实测） | `brew install python@3.12`<br>或 [python.org](https://www.python.org/downloads/) 安装包 | `brew install node` |
-| **Debian / Ubuntu**<br>（未实测） | `sudo apt install python3 python3-venv python3-pip` | 见下面的 ⚠️ |
+| 系统 | Python | Node | ffmpeg |
+|---|---|---|---|
+| **Windows** | [python.org](https://www.python.org/downloads/) 安装包，**务必勾选 `Add python.exe to PATH`** | [nodejs.org](https://nodejs.org/) 安装包 | [gyan.dev](https://www.gyan.dev/ffmpeg/builds/) 下载后把 `bin` 加进 PATH，或 `winget install ffmpeg` |
+| **macOS**<br>（未实测） | `brew install python@3.12`<br>或 [python.org](https://www.python.org/downloads/) 安装包 | `brew install node` | `brew install ffmpeg` |
+| **Debian / Ubuntu**<br>（未实测） | `sudo apt install python3 python3-venv python3-pip` | 见下面的 ⚠️ | `sudo apt install ffmpeg` |
 
 > ⚠️ **Linux 上不要用 `apt install nodejs`** —— Ubuntu 22.04 源里是 Node **12**，
 > 达不到 18，装了也白装。用 [NodeSource](https://github.com/nodesource/distributions)
@@ -56,6 +63,10 @@ Windows 的两个安装包直接下；**macOS / Linux 那两行是按开源圈�
 > curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt install -y nodejs
 > ```
 > 另外 **`python3-venv` 别漏**，少了它下一步 `python3 -m venv` 会直接报错。
+
+> **ffmpeg 不在 PATH 里怎么办**：和 Node 一样留了环境变量，
+> 用 `ADSKIPER_FFMPEG=/path/to/ffmpeg` 指绝对路径即可。
+> 启动后也可以打开 <http://127.0.0.1:8000/api/sites> 看 `ffmpeg` 字段是不是 `null`。
 
 ### 还需要一个能连出去的代理
 
@@ -79,20 +90,23 @@ Windows 的两个安装包直接下；**macOS / Linux 那两行是按开源圈�
 2. **双击 `start.bat`**
 3. 浏览器打开 <http://127.0.0.1:8000>
 
-**依赖是自动装的，不用手动 `pip install`。** `start.bat` 依次做四件事：
+**依赖是自动装的，不用手动 `pip install`。** `start.bat` 依次做五件事：
 
 ```
 检查 python 在不在 PATH        不在   → 报错退出，并给出下载地址
 检查 Python 版本 >= 3.10       不够   → 报错退出（否则 pip 只会丢一堆看不懂的解析错误）
 用 import 试探依赖装没装        缺了   → 自动 pip install -r requirements.txt
 找不到 node 时给一句提示        不拦   → RedTube / PornHub 照常可用，只是 hanime 用不了
+找不到 ffmpeg 时给一句提示      不拦   → 播放不受影响，只是 hanime 的「下载」用不了
 最后 python app.py
 ```
 
 所以**第一次双击会先把依赖装上（需要联网，几十 MB 量级），之后就秒开**。
 
-> **`start.bat` 只自动装 Python 依赖，不会装 Node** —— Node 不是 pip 包，脚本只能
-> 检测到缺失后提示你。想用 hanime.tv 就得自己去 [nodejs.org](https://nodejs.org/) 装一次。
+> **`start.bat` 只自动装 Python 依赖，不会装 Node 或 ffmpeg** —— 那两个不是 pip 包，
+> 脚本只能检测到缺失后提示你。想用 hanime.tv 就去 [nodejs.org](https://nodejs.org/)
+> 装 Node；想下载 hanime 的视频再去装 [ffmpeg](https://www.gyan.dev/ffmpeg/builds/)。
+> **两个都不装也不影响 RedTube / PornHub。**
 >
 > 装依赖走的是系统网络 / pip 自己的代理设置，**不走上面那个出口代理**。
 > 国内网络嫌慢可以换镜像：
@@ -201,6 +215,7 @@ python app.py
 | `ADSKIPER_MEDIA_HOSTS` | 空 | 追加媒体 CDN 域名后缀，逗号分隔 |
 | `ADSKIPER_RESOLVE_TTL` | `3000` | 直链解析缓存秒数（签名 URL 约 2 小时过期） |
 | `ADSKIPER_NODE_BIN` | `node` | 签名助手用的 Node 可执行文件。Node 是 nvm / Homebrew 装的、又不在当前 PATH 里时，用绝对路径指过去（如 `/opt/homebrew/bin/node`） |
+| `ADSKIPER_FFMPEG` | 从 PATH 找 | 下载 hanime 视频用的 ffmpeg 可执行文件。不在 PATH 里时用绝对路径指过去 |
 
 ---
 
@@ -509,6 +524,68 @@ node tools/history_check.js      # 56 项断言，无需启动服务、无第三
 
 ---
 
+## 下载（另存为）
+
+播放页左上角有 **「下载」** 按钮，存当前选中的清晰度。三个站都支持，但底下的机制
+完全不同 —— 这也是为什么 hanime 的下载要额外依赖 ffmpeg。
+
+### 为什么 tube 站"右键就能存"，hanime 不行
+
+| | 形态 | 能不能直接存 |
+|---|---|---|
+| RedTube / PornHub | **单个渐进式 MP4**，一个 URL 就是一个完整文件 | ✅ 浏览器自带的下载按钮就能存 |
+| hanime | **HLS**：m3u8 只是一张目录，真正的视频是 **142 个 AES-128 加密的分片**（实测一部 44 分钟的番剧 ≈ 294 MB） | ❌ 没有"一个文件"可存 |
+
+在 hanime 上直接"下载"，存下来的是**播放列表文本文件**（十几到几十 KB，记事本打开是
+`#EXTM3U` 开头的一堆 URL），不是视频。而且那些分片还是加密的，光拖下来也播不了。
+
+### 两条路
+
+```
+tube 站  →  /api/download 返回 307，跳到 /api/media 并带上附件头
+            复用那边已经写好的 Range / Referer / 域名白名单逻辑，一行都不重复
+
+hanime   →  /api/download 起一个 ffmpeg 子进程：
+            ffmpeg 读「我们自己代理改写过的 m3u8」→ 解密 → 封装成 MP4 → 管道流出
+            不落盘：294 MB 先写磁盘要么占空间，要么让用户对着没有反馈的按钮干等
+```
+
+让 ffmpeg 读**经本机 `/api/media` 中转**的播放列表是个关键设计：分片和 AES 密钥都会
+走我们的出口，于是 **ffmpeg 自己完全不用配代理**，也不受域名白名单影响。
+
+### 三个必须记住的 ffmpeg 参数（都是实测踩出来的）
+
+```bash
+ffmpeg -i <经 /api/media 的 m3u8> -c copy \
+       -bsf:a aac_adtstoasc \
+       -movflags frag_keyframe+empty_moov+default_base_moof \
+       -f mp4 pipe:1
+```
+
+| 参数 | 不加会怎样 |
+|---|---|
+| `-bsf:a aac_adtstoasc` | HLS 分片里的 AAC 带 ADTS 头，塞进 MP4 必须剥掉。**写普通文件时 ffmpeg 会自动补这个滤镜，输出到管道时不会** —— 不加直接报 `Malformed AAC bitstream detected`，只产出 2 KB 垃圾 |
+| `frag_keyframe+empty_moov` | 管道不可 seek，`+faststart` 会直接报 `muxer does not support non seekable output`。改用 fragmented MP4，moov 写在最前面（实测偏移 32），才能边生成边发 |
+| `-nostdin` | 防止 ffmpeg 去抢主进程的 stdin |
+
+### 实测数据
+
+一部 44 分 27 秒的番剧（720p）：
+
+| 项 | 结果 |
+|---|---|
+| 体积 | 293.4 MB |
+| 首字节 | **0.6 秒**（浏览器立刻开始有进度，不用等整部） |
+| 完整下载 | **19.7 秒**（14.91 MB/s） |
+| ffprobe | h264 1280×720 + aac，时长 2666.66 秒 |
+| 全程解码校验 | `ffmpeg -f null -` **零错误** |
+
+> 没有 ffmpeg 时会返回一句明确的中文错误，并且**只影响 hanime 的下载** ——
+> 播放、以及 RedTube / PornHub 的下载都不受影响。前端也会提前拦下来，不会让浏览器
+> 跳到一个 JSON 报错页（下载用隐藏 iframe 触发，错误就渲染在看不见的地方）。
+
+---
+
 ## 加一个新站点的搜索适配器
 
 继承 `SiteAdapter`，注册进 `SITES`，再往 `SUPPORTED_SITES` 加一行（站点按钮由它驱动）。
@@ -565,12 +642,13 @@ SITES[SomeSite.key] = SomeSite
 
 | 端点 | 说明 |
 |---|---|
-| `GET /api/sites` | 支持的站点（含 `supports_search`） |
+| `GET /api/sites` | 支持的站点（含 `supports_search`）。顶层还有 `ffmpeg` 字段：`null` = 没找到 |
 | `GET /api/random?site=&count=` | 随机推荐。`count` 默认 10、上限 60。返回结构和 `/api/search` 一致，多一个 `random: true` |
 | `GET /api/search?q=&page=&site=` | 搜索。`q` 用空格分隔多个词（AND）。返回里带 `terms` / `term_count` |
 | `GET /api/thumb?id=&site=` | 兜底封面：取视频页 `og:image` |
 | `GET /api/resolve?url=` 或 `?id=&site=` | 解析直链，`&refresh=1` 强制刷新 |
-| `GET /api/media?u=&r=` | Range-aware 流式中转（m3u8 会自动改写 URI） |
+| `GET /api/download?url=` 或 `?id=&site=` | **另存为**。`&quality=720p` 选清晰度，留空 = 最高。tube 站返回 307 跳去 `/api/media`；hanime 由 ffmpeg 流式吐 MP4 |
+| `GET /api/media?u=&r=` | Range-aware 流式中转（m3u8 会自动改写 URI）。`&dl=<文件名>` 则作为附件下载（带 RFC 5987 文件名，中文标题不乱码） |
 | `GET /api/docs` | 自动生成的接口文档 |
 
 `?id=` 的形状**各站不同**（RedTube 纯数字、PornHub 是 viewkey、hanime 是 slug），
